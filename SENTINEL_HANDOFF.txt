@@ -1,0 +1,278 @@
+MIND SENTINEL — PROJECT HANDOFF DOCUMENT
+Generated: 2026-02-18
+Version: v2.4
+=========================================================
+
+SYSTEM IDENTITY FOR NEW CONVERSATION
+--------------------------------------
+You are Claude, CO-lead project developer on mINd-SENTinel.
+Tone: Clinical, dry, technical. Devil's advocate. No fluff.
+Run Red Team Protocol before answering: Scalability / Security / Complexity / Maintenance.
+Label all claims: VERIFIED / PLAUSIBLE / SPECULATIVE / UNKNOWN.
+End major decisions with "The logic holds" or "The logic is fractured."
+When Jules is mentioned: review orders, provide rollback plan.
+No feature is done without: tests, rollback plan, privacy note.
+
+
+WHAT THIS PROJECT IS
+---------------------
+mINd-SENTinel is an offline SMS & call log intent analyzer.
+It parses Android SMS Backup & Restore XML files, detects threatening/concerning
+patterns using keyword detection + Ollama LLM, builds per-contact risk profiles,
+and exports everything to a local SQLite database.
+
+Use case: Legal documentation tool for family court / protective order situations.
+Target user: Brent Hovland (special education teacher, neurodivergent advocate, Plymouth MN).
+Philosophy: All processing on-device. No data leaves the machine. Privacy-first.
+
+LEGAL WARNING (embedded in all outputs):
+AI-generated intent labels are probabilistic inferences.
+Do not present as legal conclusions without attorney review.
+
+
+DIRECTORY STRUCTURE
+--------------------
+G:\My Drive\mINd-SENTinel\          ← Project root (also on GitHub via Jules)
+│
+├── sentinel\                        ← Main Python package
+│   ├── __init__.py
+│   ├── cli.py                       ← Command-line interface (LOCAL VERSION IS OLD — see sync issues)
+│   ├── api.py                       ← NEW: Dual-mode API (HTTP server + importable class)
+│   │
+│   ├── parsers\
+│   │   ├── sms_parser.py            ← Parses sms-*.xml files (iterparse, OOM-safe)
+│   │   └── call_parser.py          ← Parses calls-*.xml files
+│   │
+│   ├── detectors\
+│   │   └── intent_detector.py      ← Keyword detection + Ollama LLM analysis
+│   │
+│   ├── models\
+│   │   └── record.py               ← Dataclasses: MessageRecord, CallRecord, IntentResult, ContactProfile
+│   │
+│   ├── exporters\
+│   │   └── sqlite_exporter.py      ← Writes to SQLite (LOCAL VERSION IS OLD v1.0 — see sync issues)
+│   │
+│   ├── aggregators\                 ← NEW (session-built, manually placed)
+│   │   ├── __init__.py
+│   │   └── contact_aggregator.py   ← Builds per-contact risk profiles from message/intent data
+│   │
+│   ├── filters\
+│   │   └── contact_filter.py       ← Business contact exclusion logic
+│   │
+│   ├── llm\
+│   │   └── ollama_client.py        ← Ollama API wrapper
+│   │
+│   └── uplifts\
+│       └── extractor.py            ← CONTACT_RELATIONSHIPS dict, uplift extraction
+│
+├── tests\
+│   ├── test_parsers.py             ← 19 tests
+│   ├── test_contact_aggregator.py  ← 36 tests
+│   └── test_api.py                 ← 36 tests
+│                                     TOTAL: 91 tests, all pass (in container)
+│
+├── build_profiles.py               ← One-off script: loads DB, builds profiles, writes back
+├── run_scan.py                     ← One-off script: surgical AI scan for single contact
+│
+├── database\
+│   └── vault_schema.sql
+│
+├── docs\
+│   ├── DATA_SAFETY.md
+│   └── PLAY_STORE_LISTING.md
+│
+├── DIVERGENCE_LEDGER.md            ← Public failure log (Kantian transparency)
+├── PHILOSOPHY.md
+├── PRIVACY_POLICY.md
+├── README.md
+├── ROADMAP.md
+├── CONTRIBUTING.md
+├── requirements.txt
+└── setup.py
+
+
+SQLITE DATABASE SCHEMA (v2.0)
+------------------------------
+File: test-output.db (live data) or sentinel.db (default)
+
+Tables:
+  messages          — raw SMS records (10,091 rows in live DB)
+  calls             — raw call log records (2,649 rows)
+  intent_results    — flagged messages with keyword + AI analysis (842 rows)
+  contact_profiles  — per-contact risk aggregates (323 rows, built this session)
+  sentinel_meta     — run history / metadata
+
+Key fields in contact_profiles:
+  phone_number, contact_name, total_messages, total_calls,
+  total_flags, flag_rate, high_count, medium_count, low_count,
+  risk_score (0-100, SPECULATIVE formula), risk_label (LOW/MEDIUM/HIGH/CRITICAL),
+  category_breakdown (JSON), escalation_trend (STABLE/ESCALATING/DE-ESCALATING/UNKNOWN),
+  relationship_tags (JSON), first_contact_ms, last_contact_ms
+
+Risk score formula (SPECULATIVE — not clinically validated):
+  score = (high×3 + medium×2 + low×1) / max(total_messages,1) × 100, capped at 100
+
+
+FILE-BY-FILE SUMMARY
+---------------------
+
+sentinel/api.py (NEW — v2.4)
+  Dual-mode API layer.
+  Mode 1: from sentinel.api import SentinelAPI — importable class for mINd-REPly/mINd-VAULt
+  Mode 2: python -m sentinel.api --port 8765 — FastAPI HTTP server for Looking Glass UI
+  Methods: get_contacts(), get_contact(phone), get_messages(), get_meta(), run_scan()
+  HTTP endpoints: POST /scan, GET /contacts, GET /contacts/{phone}, GET /messages, GET /meta, GET /health
+  CORS: localhost only. Binds to 127.0.0.1 only.
+  Requires: pip install fastapi uvicorn (optional — class works without it)
+
+sentinel/aggregators/contact_aggregator.py (NEW — v2.3/2.4)
+  Aggregates per-message intent flags into per-contact risk profiles.
+  Main function: build_contact_profiles(messages, calls, intent_results, contact_relationships)
+  Returns: List[ContactProfile] sorted by risk_score DESC
+  Escalation trend: compares flag rate in first vs second half of timeline (±25% threshold)
+  Relationship tags: matched from CONTACT_RELATIONSHIPS dict (case-insensitive)
+
+sentinel/cli.py (LOCAL VERSION IS OLD)
+  Local machine missing: --address flag, --top-contacts flag, --contact-report flag
+  These were added in sessions but never synced to local machine.
+
+sentinel/exporters/sqlite_exporter.py (LOCAL VERSION IS OLD — v1.0)
+  Local machine missing: contact_profiles parameter in export()
+  New version adds contact_profiles table write support.
+
+sentinel/parsers/sms_parser.py
+  Uses iterparse (not ElementTree.parse) — OOM-safe for large XML files.
+  Handles multi-part MMS, Unicode, malformed XML gracefully.
+
+sentinel/detectors/intent_detector.py
+  Two modes: keyword-only (fast, no Ollama) and full AI (Ollama LLM).
+  Keyword categories: threats, harassment, custody, financial, legal, surveillance.
+  AI mode: sends flagged message + context window to Ollama, gets structured JSON back.
+
+sentinel/uplifts/extractor.py
+  Contains CONTACT_RELATIONSHIPS dict — maps contact names to relationship tags.
+  Example: {"Tiffany Hovland": "ex-wife", "Jaxon Hovland": "child"}
+  IMPORTANT: Tiffany tag needs local correction (was incorrectly set as "partner" in early session).
+  User must manually verify this dict matches actual relationships.
+
+
+LIVE DATA SUMMARY (test-output.db)
+------------------------------------
+Last scan: 2026-02-17T19:40:37 (keyword-only mode)
+Messages: 10,091 | Calls: 2,649 | Intent flags: 842
+Contact profiles: 323 (built this session)
+
+Top contacts by message volume (received):
+  4,022  Tiffany Hovland      ← primary subject, ex-wife
+    351  Comcast Xfinity
+    190  Jaxon Hovland        ← son
+    142  Jaxon                ← duplicate entry (same person)
+
+Risk scores are ALL LOW currently because scan ran keyword-only.
+AI analysis (Ollama) has NOT been run yet on Tiffany's messages.
+run_scan.py was prepared to do this — it was not confirmed complete this session.
+
+Phone number for Tiffany: +16125550001 (used in surgical scan commands)
+NOTE: Tiffany appears 3-4 times in profiles = multiple phone numbers in backup.
+
+
+SYNC ISSUES — CRITICAL
+-----------------------
+Your local machine (G:\My Drive\mINd-SENTinel) is BEHIND the session-built versions.
+
+Files that exist in Claude's container but may be missing or outdated locally:
+  MISSING:    sentinel/aggregators/__init__.py       (manually placed this session)
+  MISSING:    sentinel/aggregators/contact_aggregator.py  (manually placed this session)
+  MISSING:    sentinel/api.py                        (manually placed this session)
+  OUTDATED:   sentinel/cli.py                        (missing --address and other flags)
+  OUTDATED:   sentinel/exporters/sqlite_exporter.py  (missing contact_profiles support)
+  NEW:        tests/test_contact_aggregator.py        (36 tests — may not be local)
+  NEW:        tests/test_api.py                       (36 tests — may not be local)
+
+ACTION REQUIRED (tell Jules):
+  Pull all files from the Claude session container and commit them.
+  Key commit: "sync v2.4 — aggregators, api, updated cli and exporter"
+  After sync: python -m pytest tests/ should show 91 passing.
+
+
+JULES INTEGRATION NOTES
+------------------------
+Jules is a Google AI agent with GitHub access.
+When giving Jules instructions, include:
+  1. Exact file paths
+  2. What changed and why
+  3. Rollback plan (almost always: git revert HEAD)
+  4. Privacy note
+
+Repo structure uses hub-spoke model:
+  nous-hub    — private strategy
+  nous-vault  — sensitive data
+  said-node   — public engine (mINd-SENTinel lives here)
+
+
+ENVIRONMENT
+-----------
+OS: Windows 11, PowerShell
+Python: 3.14.2 (pythoncore-3.14-64)
+pip: use "python -m pip" (pip not in PATH)
+Project root: G:\My Drive\mINd-SENTinel
+Ollama: RUNNING at http://localhost:11434
+Model available: llama3.1:8b (confirmed this session)
+Package install: python -m pip install -e . (run from project root)
+
+IMPORTANT PowerShell rules:
+  - Never type Python code directly in PowerShell
+  - Always use: python script.py  OR  python -c "single line"
+  - For multi-line Python: save as .py file, then python filename.py
+  - exit Python REPL with Ctrl+Z then Enter (not exit())
+  - pip = python -m pip
+
+
+IMMEDIATE NEXT STEPS (priority order)
+---------------------------------------
+1. Confirm run_scan.py completed successfully (AI scan on Tiffany +16125550001)
+2. Run build_profiles.py again after scan to update risk scores
+3. Sync local files with Jules — commit all session-built files to repo
+4. Start the API server: python -m sentinel.api --db "G:\My Drive\mINd-SENTinel\test-output.db"
+5. Test Looking Glass UI against live API (GET /contacts, GET /messages)
+6. Verify CONTACT_RELATIONSHIPS in extractor.py has correct tags for all key contacts
+
+
+ROADMAP ITEMS (not yet built)
+------------------------------
+- Date range filtering on CLI and API
+- PDF export for legal documentation
+- Termux/Android install and test (Z Fold 4)
+- False positive rate measurement
+- Looking Glass UI updates to call new API endpoints
+- mINd-REPly integration using SentinelAPI class
+- mINd-VAULt integration using SentinelAPI class
+
+
+DIVERGENCE LEDGER ENTRIES (known issues, documented publicly)
+--------------------------------------------------------------
+1. Risk score formula is SPECULATIVE — not validated against clinical/forensic data
+2. Escalation trend ±25% threshold is ARBITRARY — needs real-world tuning
+3. Tiffany relationship tag may be incorrect in local extractor.py
+4. Local codebase is behind session-built versions (sync required)
+5. Duplicate contact profiles (same person, multiple phone numbers) — dedup not yet implemented
+
+
+HOW TO START THE API SERVER (once synced)
+------------------------------------------
+Install dependencies (one time):
+  python -m pip install fastapi uvicorn
+
+Start server:
+  cd "G:\My Drive\mINd-SENTinel"
+  python -m sentinel.api --db "G:\My Drive\mINd-SENTinel\test-output.db" --port 8765
+
+Test it:
+  curl http://localhost:8765/health
+  curl http://localhost:8765/contacts
+  curl "http://localhost:8765/messages?severity=HIGH&limit=10"
+
+Looking Glass calls these endpoints via fetch() in the browser.
+
+
+END OF HANDOFF DOCUMENT

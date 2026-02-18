@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.xml.bak
+
+# Release artifacts
+mind-sentinel-zfold4.zip
+
+# Databases — NEVER commit personal data
+*.db
+*.sqlite
+*.sqlite3
+uplifts.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets / keys
+.env
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+*.swp

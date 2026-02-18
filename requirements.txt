@@ -1,0 +1,15 @@
+# MIND Sentinel — requirements
+# All standard library except openpyxl (optional Excel export)
+# No heavy ML dependencies — Ollama handles the LLM locally
+
+# No required third-party packages.
+# Standard library modules used: sqlite3, xml, json, argparse, pathlib, logging
+
+# Optional: Excel export support
+# openpyxl>=3.1.0
+
+# Optional: Progress bar (nicer CLI)
+# tqdm>=4.65.0
+
+# Dev/test only
+pytest>=8.0.0
