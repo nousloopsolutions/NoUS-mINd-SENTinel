@@ -59,7 +59,7 @@ def export(
         _write_meta(conn, messages, calls, intents, run_label)
         conn.commit()
         logger.info(
-            f"SQLite export complete → {db_path}\n"
+            f"SQLite export complete -> {db_path}\n"
             f"  Messages: {len(messages)} | Calls: {len(calls)} | "
             f"Intent flags: {len(intents)}"
         )

@@ -4,6 +4,11 @@ Parses SMS Backup & Restore call log XML files (calls-*.xml).
 
 FIX v2.0: Replaced ET.fromstring() with ET.iterparse() for streaming.
           Eliminated OOM crash on large call logs. No record count cap.
+
+FIX v2.1 (Phase 4.2, Architect): BOM and encoding aligned with sms_parser.py.
+          Same _read_xml_text logic: UTF-8-BOM, UTF-16-LE/BE by BOM, else UTF-8.
+          No message content in logs. Parser output schema unchanged.
+          Phase 7.1: encoding fix verified; tests and DIVERGENCE_LEDGER entry added.
 """
 
 import xml.etree.ElementTree as ET
@@ -18,6 +23,11 @@ from sentinel.models.record import CallRecord
 
 logger = logging.getLogger(__name__)
 
+# BOMs for encoding detection (aligned with sms_parser.py Phase 0.3c)
+BOM_UTF8 = b'\xef\xbb\xbf'
+BOM_UTF16_LE = b'\xff\xfe'
+BOM_UTF16_BE = b'\xfe\xff'
+
 CALL_TYPE = {
     '1': 'Incoming', '2': 'Outgoing', '3': 'Missed',
     '4': 'Voicemail','5': 'Rejected', '6': 'Blocked',
@@ -25,16 +35,39 @@ CALL_TYPE = {
 }
 
 
+def _read_xml_text(path: Path) -> str:
+    """
+    Read XML file with BOM/encoding handling (aligned with sms_parser.py).
+    Tries UTF-8-BOM strip, then UTF-16 if BOM present, else UTF-8 with replace.
+    """
+    raw = path.read_bytes()
+    if raw.startswith(BOM_UTF8):
+        return raw[len(BOM_UTF8):].decode('utf-8', errors='replace')
+    if raw.startswith(BOM_UTF16_LE):
+        return raw[len(BOM_UTF16_LE):].decode('utf-16-le', errors='replace')
+    if raw.startswith(BOM_UTF16_BE):
+        return raw[len(BOM_UTF16_BE):].decode('utf-16-be', errors='replace')
+    try:
+        return raw.decode('utf-8', errors='strict')
+    except UnicodeDecodeError:
+        return raw.decode('utf-8', errors='replace')
+
+
+def _strip_stylesheet(content: str) -> str:
+    return re.sub(r'<\?xml-stylesheet[^?]*\?>', '', content)
+
+
 def parse_call_file(path: Path) -> List[CallRecord]:
     """
     Parse a single calls XML file using streaming iterparse.
     No record count cap — processes all records regardless of file size.
+    Supports UTF-8, UTF-8-BOM, UTF-16-LE/BE (same as sms_parser).
     """
     records: List[CallRecord] = []
 
     try:
-        content = path.read_text(encoding='utf-8', errors='replace')
-        content = re.sub(r'<\?xml-stylesheet[^?]*\?>', '', content)
+        content = _read_xml_text(path)
+        content = _strip_stylesheet(content)
         stream  = io.StringIO(content)
 
         for _event, el in ET.iterparse(stream, events=('end',)):

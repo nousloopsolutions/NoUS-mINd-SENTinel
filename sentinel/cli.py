@@ -30,6 +30,7 @@ from sentinel.parsers.sms_parser  import parse_sms_directory
 from sentinel.parsers.call_parser import parse_call_directory
 from sentinel.detectors.intent_detector import run_full_analysis
 from sentinel.exporters.sqlite_exporter import export
+from sentinel.aggregators.contact_aggregator import build_contact_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,11 @@ LEGAL NOTICE:
         '--calls-only',
         action  = 'store_true',
         help    = 'Parse call log files only — skip SMS',
+    )
+    parser.add_argument(
+        '--use-ollama-scorer',
+        action  = 'store_true',
+        help    = 'Use Phase 4.2c Ollama severity scorer (score only, no keyword pre-filter)',
     )
     parser.add_argument(
         '--extract-uplifts', '-u',
@@ -207,7 +213,7 @@ LEGAL NOTICE:
 
             if not llm.is_available():
                 _print(
-                    f"\n{YELLOW}⚠ Ollama unavailable — falling back to keyword-only mode.{RESET}\n"
+                    f"\n{YELLOW}WARN: Ollama unavailable - falling back to keyword-only mode.{RESET}\n"
                     f"  To enable AI: start Ollama, then run:\n"
                     f"  ollama pull {args.model}\n"
                 )
@@ -215,41 +221,55 @@ LEGAL NOTICE:
 
         t0 = time.time()
 
-        def progress(current, total, msg):
-            pct = int((current / total) * 40)
-            # ASCII-only progress bar for Windows/narrow encodings (Phase 0.3b)
-            bar = '#' * pct + '-' * (40 - pct)
-            safe_msg = msg[:40].encode('ascii', errors='replace').decode('ascii')
-            sys.stdout.write(f"\r  [{bar}] {current}/{total} - {safe_msg:<40}")
-            sys.stdout.flush()
+        if getattr(args, 'use_ollama_scorer', False) and llm:
+            from sentinel.scorer.ollama_scorer import score_messages
+            def prog(i, total):
+                pct = int((i / total) * 40)
+                bar = '#' * pct + '-' * (40 - pct)
+                sys.stdout.write(f"\r  [{bar}] {i}/{total} scoring...")
+                sys.stdout.flush()
+            intents = score_messages(messages, llm, progress_cb=prog)
+            sys.stdout.write('\n')
+            _ok(f"{len(intents)} severity scores in {_elapsed(t0)}")
+        else:
+            def progress(current, total, msg):
+                pct = int((current / total) * 40)
+                bar = '#' * pct + '-' * (40 - pct)
+                safe_msg = msg[:40].encode('ascii', errors='replace').decode('ascii')
+                sys.stdout.write(f"\r  [{bar}] {current}/{total} - {safe_msg:<40}")
+                sys.stdout.flush()
 
-        intents = run_full_analysis(
-            messages       = messages,
-            llm            = llm,
-            context_window = args.context_window,
-            progress_cb    = progress,
-        )
+            intents = run_full_analysis(
+                messages       = messages,
+                llm            = llm,
+                context_window = args.context_window,
+                progress_cb    = progress,
+            )
 
-        sys.stdout.write('\n')
-        mode = 'AI-confirmed' if llm else 'keyword'
-        _ok(
-            f"{len(intents)} {mode} flags in {_elapsed(t0)}"
-        )
+            sys.stdout.write('\n')
+            mode = 'AI-confirmed' if llm else 'keyword'
+            _ok(
+                f"{len(intents)} {mode} flags in {_elapsed(t0)}"
+            )
+
+    # ── CONTACT PROFILES (4.2d) ──────────────────────────────
+    profiles = build_contact_profiles(messages, calls, intents) if (messages or calls or intents) else []
 
     # ── EXPORT ───────────────────────────────────────────────
     _step("Writing SQLite database...")
     t0 = time.time()
     export(
-        db_path   = args.output,
-        messages  = messages,
-        calls     = calls,
-        intents   = intents,
-        run_label = args.run_label or str(xml_dir),
+        db_path          = args.output,
+        messages         = messages,
+        calls            = calls,
+        intents          = intents,
+        contact_profiles = profiles,
+        run_label        = args.run_label or str(xml_dir),
     )
     _ok(f"Database written in {_elapsed(t0)}")
 
     # ── SUMMARY ──────────────────────────────────────────────
-    _print(f"\n{BOLD}{GREEN}✓ Complete{RESET}")
+    _print(f"\n{BOLD}{GREEN}[OK] Complete{RESET}")
     _print(f"  Messages   : {len(messages):,}")
     _print(f"  Calls      : {len(calls):,}")
     _print(f"  Flags      : {len(intents):,}")
@@ -260,12 +280,15 @@ LEGAL NOTICE:
         high   = sum(1 for r in intents if r.ai_severity == 'HIGH')
         medium = sum(1 for r in intents if r.ai_severity == 'MEDIUM')
         low    = sum(1 for r in intents if r.ai_severity == 'LOW')
+        amb    = sum(1 for r in intents if (r.ai_severity or '').upper() == 'AMBIGUOUS')
         _print(f"\n  Severity breakdown:")
-        _print(f"    🔴 HIGH   : {high}")
-        _print(f"    ⚠  MEDIUM : {medium}")
-        _print(f"    🟡 LOW    : {low}")
+        _print(f"    HIGH   : {high}")
+        _print(f"    MEDIUM : {medium}")
+        _print(f"    LOW    : {low}")
+        if amb:
+            _print(f"    AMBIGUOUS (fail-closed): {amb}")
 
-    _print(f"\n{YELLOW}⚖ LEGAL NOTE: AI labels are probabilistic inferences only.{RESET}")
+    _print(f"\n{YELLOW}LEGAL NOTE: AI labels are probabilistic inferences only.{RESET}")
     _print(f"  Consult your attorney before using in any legal proceeding.\n")
 
     # ── UPLIFT EXTRACTION ────────────────────────────────────
@@ -282,7 +305,7 @@ LEGAL NOTICE:
             _print(f"\n  Open looking_glass/index.html and paste your uplifts.json path.")
             _print(f"  Or embed it directly in PERSONAL_UPLIFTS_DATA in the HTML.")
         except Exception as e:
-            _print(f"  {YELLOW}⚠ Uplift extraction failed: {e}{RESET}")
+            _print(f"  {YELLOW}WARN: Uplift extraction failed: {e}{RESET}")
 
 
 # ── PRINT HELPERS ────────────────────────────────────────────
@@ -300,8 +323,13 @@ def _banner():
     except UnicodeEncodeError:
         _print("\n  MIND SENTINEL — Nous Loop Solutions — Offline Intent Analyzer\n")
 
-def _step(msg):  _print(f"  {CYAN}→{RESET} {msg}")
-def _ok(msg):    _print(f"  {GREEN}✓{RESET} {msg}")
+def _step(msg):
+    # ASCII-safe for Windows/narrow encodings (Phase 0.3b)
+    _print(f"  {CYAN}->{RESET} {msg}")
+
+def _ok(msg):
+    _print(f"  {GREEN}[OK]{RESET} {msg}")
+
 def _print(msg): print(msg)
 
 def _elapsed(t0: float) -> str:

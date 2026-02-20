@@ -28,6 +28,16 @@ Each entry follows this structure:
 
 ## ACTIVE ENTRIES
 
+### 2026-02-20 — call_parser.py encoding (UTF-16 / UTF-8-BOM)
+**Type:** Bug — Resolved
+**Status:** Resolved
+**Impact:** Users with calls-*.xml exported as UTF-16 or UTF-8-BOM (Android export format varies)
+**What happened:** call_parser.py used basic UTF-8 only; sms_parser.py had BOM/UTF-16 handling from Phase 0.3c. calls-*.xml with UTF-16 or UTF-8-BOM could mis-decode or fail.
+**What we did:** Aligned call_parser.py with sms_parser.py: _read_xml_text() with BOM detection and UTF-16 fallback. Implemented in Phase 4.2 per Architect Decision 1 (before scorer touches data). Tests: test_call_parser_utf8_standard, test_call_parser_utf8_bom, test_call_parser_utf16_bom.
+**Lesson:** Parsers for the same export family (SMS Backup & Restore) must share encoding handling so court-admissible output is consistent across SMS and call logs.
+
+---
+
 ### 2025-02-17 — Keyword False Positive Rate Unknown
 **Type:** Known Gap
 **Status:** Open
