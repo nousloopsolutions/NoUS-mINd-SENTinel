@@ -1,5 +1,5 @@
 # JULES AGENT DIRECTIVES — mINd-SENTinel
-# Version: 2026-02-20
+# Version: 2026-02-20.1
 # Authority: Nous Loop Solutions / Sovereign Architect
 # Read this file completely before executing any task.
 
@@ -50,9 +50,11 @@ mINd-SENTinel does ONE thing: analyze SMS/call log exports for intent patterns r
 
 ---
 
-## 3. PHASE 0.3 TASKS (CURRENT — COMPLETE THESE FIRST)
+## 3. PHASE 0.3 TASKS — CLOSED
 
-These are the only tasks authorized for the current session:
+**Phase 0.3 — mINd-SENTinel queue fix — CLOSED (2026-02-20, Architect confirmed)**
+
+The following tasks were authorized for Phase 0.3; they are now closed. Current authorized work is Phase 4.2 (Instance C). Historical task list:
 
 **[0.3a] Verify active repository and task queue**
 - Confirm you are in mINd-SENTinel repo
