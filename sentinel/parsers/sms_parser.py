@@ -6,6 +6,10 @@ Handles both <sms> and <mms> nodes.
 FIX v2.0: Replaced ET.fromstring() with ET.iterparse() for streaming.
           Large XML files (>200MB) no longer cause OOM errors.
 
+FIX v2.1 (Phase 0.3c): BOM and encoding — open with utf-8-sig to strip BOM;
+          detect UTF-16 by BOM and decode; fallback to utf-8 with errors='replace'.
+          Android export format varies by version; this avoids file read errors.
+
 Schema: https://synctech.com.au/sms-backup-restore/fields-in-xml-backup-files/
 """
 
@@ -21,6 +25,11 @@ from sentinel.models.record import MessageRecord
 
 logger = logging.getLogger(__name__)
 
+# BOMs for encoding detection (Phase 0.3c)
+BOM_UTF8 = b'\xef\xbb\xbf'
+BOM_UTF16_LE = b'\xff\xfe'
+BOM_UTF16_BE = b'\xfe\xff'
+
 SMS_DIRECTION = {
     '1': 'Received', '2': 'Sent', '3': 'Draft',
     '4': 'Outbox',   '5': 'Failed', '6': 'Queued',
@@ -30,16 +39,36 @@ MMS_DIRECTION = {
 }
 
 
+def _read_xml_text(path: Path) -> str:
+    """
+    Read XML file with BOM/encoding handling (Phase 0.3c).
+    Tries utf-8-sig (strips BOM), then UTF-16 if BOM present, else utf-8 with replace.
+    """
+    raw = path.read_bytes()
+    if raw.startswith(BOM_UTF8):
+        return raw[len(BOM_UTF8):].decode('utf-8', errors='replace')
+    if raw.startswith(BOM_UTF16_LE):
+        return raw[len(BOM_UTF16_LE):].decode('utf-16-le', errors='replace')
+    if raw.startswith(BOM_UTF16_BE):
+        return raw[len(BOM_UTF16_BE):].decode('utf-16-be', errors='replace')
+    # No BOM: try UTF-8 first (most common), then fallback
+    try:
+        return raw.decode('utf-8', errors='strict')
+    except UnicodeDecodeError:
+        return raw.decode('utf-8', errors='replace')
+
+
 def parse_sms_file(path: Path) -> List[MessageRecord]:
     """
     Parse a single SMS Backup & Restore XML file using streaming iterparse.
     Handles arbitrarily large files without loading into RAM.
+    Supports UTF-8, UTF-8-BOM, UTF-16-LE/BE (Phase 0.3c).
     Returns list of MessageRecord — empty list on parse failure.
     """
     records: List[MessageRecord] = []
 
     try:
-        content = path.read_text(encoding='utf-8', errors='replace')
+        content = _read_xml_text(path)
         content = _strip_stylesheet(content)
         stream  = io.StringIO(content)
 

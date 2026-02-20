@@ -57,9 +57,10 @@ LEGAL NOTICE:
 
     parser.add_argument(
         '--xml-dir', '-d',
-        required = True,
+        required = False,
         type     = Path,
-        help     = 'Directory containing sms-*.xml and calls-*.xml files',
+        default  = None,
+        help     = 'Directory containing sms-*.xml and calls-*.xml files (required unless --list-models)',
     )
     parser.add_argument(
         '--output', '-o',
@@ -143,6 +144,7 @@ LEGAL NOTICE:
 
     # ── LIST MODELS ──────────────────────────────────────────
     if args.list_models:
+        # --list-models does not require --xml-dir (Phase 0.3b: CLI fix)
         from sentinel.llm.ollama_adapter import OllamaAdapter
         adapter = OllamaAdapter(host=args.ollama_host)
         models  = adapter.list_available_models()
@@ -156,6 +158,9 @@ LEGAL NOTICE:
 
     # ── VALIDATE INPUT DIR ───────────────────────────────────
     xml_dir = args.xml_dir
+    if xml_dir is None:
+        _print(f"{RED}Error: --xml-dir is required for analysis. Use --list-models to only list Ollama models.{RESET}")
+        sys.exit(1)
     if not xml_dir.exists():
         _print(f"{RED}Error: Directory not found: {xml_dir}{RESET}")
         sys.exit(1)
@@ -212,10 +217,10 @@ LEGAL NOTICE:
 
         def progress(current, total, msg):
             pct = int((current / total) * 40)
-            bar = '█' * pct + '░' * (40 - pct)
-            sys.stdout.write(
-                f"\r  [{bar}] {current}/{total} — {msg[:40]:<40}"
-            )
+            # ASCII-only progress bar for Windows/narrow encodings (Phase 0.3b)
+            bar = '#' * pct + '-' * (40 - pct)
+            safe_msg = msg[:40].encode('ascii', errors='replace').decode('ascii')
+            sys.stdout.write(f"\r  [{bar}] {current}/{total} - {safe_msg:<40}")
             sys.stdout.flush()
 
         intents = run_full_analysis(
@@ -283,17 +288,17 @@ LEGAL NOTICE:
 # ── PRINT HELPERS ────────────────────────────────────────────
 
 def _banner():
-    _print(f"""
+    # ASCII-safe banner for Windows consoles (cp1252) and other narrow encodings (Phase 0.3b)
+    banner_unicode = f"""
 {BOLD}{CYAN}
-  ███╗   ███╗██╗███╗   ██╗██████╗
-  ████╗ ████║██║████╗  ██║██╔══██╗
-  ██╔████╔██║██║██╔██╗ ██║██║  ██║
-  ██║╚██╔╝██║██║██║╚██╗██║██║  ██║
-  ██║ ╚═╝ ██║██║██║ ╚████║██████╔╝
-  ╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═════╝
-  SENTINEL — Nous Loop Solutions
+  M I N D   S E N T I N E L
+  Nous Loop Solutions
   Offline Intent Analyzer | M.I.N.D. Archive Pipeline
-{RESET}""")
+{RESET}"""
+    try:
+        _print(banner_unicode)
+    except UnicodeEncodeError:
+        _print("\n  MIND SENTINEL — Nous Loop Solutions — Offline Intent Analyzer\n")
 
 def _step(msg):  _print(f"  {CYAN}→{RESET} {msg}")
 def _ok(msg):    _print(f"  {GREEN}✓{RESET} {msg}")

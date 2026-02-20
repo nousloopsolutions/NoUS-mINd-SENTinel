@@ -118,6 +118,30 @@ class TestSmsParser:
         assert records == []
 
 
+# ── SMS PARSER ENCODING / BOM (Phase 0.3c) ─────────────────────
+
+class TestSmsParserEncoding:
+    """BOM and encoding: UTF-8, UTF-8-BOM, UTF-16 must all parse without read errors."""
+
+    def test_utf8_no_bom(self, tmp_path):
+        path = tmp_path / 'sms-utf8.xml'
+        path.write_text(SAMPLE_SMS_XML, encoding='utf-8')
+        records = parse_sms_file(path)
+        assert len(records) == 5
+
+    def test_utf8_bom(self, tmp_path):
+        path = tmp_path / 'sms-utf8-bom.xml'
+        path.write_bytes(b'\xef\xbb\xbf' + SAMPLE_SMS_XML.encode('utf-8'))
+        records = parse_sms_file(path)
+        assert len(records) == 5
+
+    def test_utf16_le_bom(self, tmp_path):
+        path = tmp_path / 'sms-utf16.xml'
+        path.write_bytes(b'\xff\xfe' + SAMPLE_SMS_XML.encode('utf-16-le'))
+        records = parse_sms_file(path)
+        assert len(records) == 5
+
+
 # ── CALL PARSER TESTS ────────────────────────────────────────
 
 class TestCallParser:
