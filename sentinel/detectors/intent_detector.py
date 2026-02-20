@@ -2,6 +2,9 @@
 sentinel/detectors/intent_detector.py
 Phase 2 orchestrator. Takes keyword candidates, sends to LLM,
 merges results. Falls back to keyword-only if LLM unavailable.
+
+Zero-Vector Shield: Ghost records (empty/whitespace body or zero-norm)
+are filtered out before analysis to avoid noise and null injections.
 """
 
 import logging
@@ -12,6 +15,20 @@ from sentinel.llm.base import LLMAdapter
 from sentinel.models.record import MessageRecord, IntentResult
 
 logger = logging.getLogger(__name__)
+
+
+def _is_ghost_record(msg: MessageRecord) -> bool:
+    """
+    Norm-check: ignore ghost SMS/call records that would produce zero signal.
+    Returns True if the record should be excluded from analysis.
+    """
+    body = (msg.body or "").strip()
+    if not body:
+        return True
+    # Optional: exclude zero/negative timestamp (corrupt or placeholder)
+    if msg.timestamp_ms <= 0:
+        return True
+    return False
 
 
 def run_full_analysis(
@@ -29,6 +46,16 @@ def run_full_analysis(
     progress_cb: optional callable(current, total, message) for CLI progress bar.
     Returns all confirmed IntentResults sorted by timestamp.
     """
+
+    # ── ZERO-VECTOR SHIELD: drop ghost records ─────────────────
+    non_ghost = [m for m in messages if not _is_ghost_record(m)]
+    dropped = len(messages) - len(non_ghost)
+    if dropped:
+        logger.info(f"Zero-Vector Shield: excluded {dropped} ghost record(s).")
+    messages = non_ghost
+    if not messages:
+        logger.info("No non-ghost messages — nothing to analyze.")
+        return []
 
     # ── PHASE 1 ──────────────────────────────────────────────
     logger.info(f"Phase 1: Keyword scan across {len(messages)} messages...")
