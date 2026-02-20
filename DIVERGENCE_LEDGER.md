@@ -36,6 +36,8 @@ Each entry follows this structure:
 **What we did:** Aligned call_parser.py with sms_parser.py: _read_xml_text() with BOM detection and UTF-16 fallback. Implemented in Phase 4.2 per Architect Decision 1 (before scorer touches data). Tests: test_call_parser_utf8_standard, test_call_parser_utf8_bom, test_call_parser_utf16_bom.
 **Lesson:** Parsers for the same export family (SMS Backup & Restore) must share encoding handling so court-admissible output is consistent across SMS and call logs.
 
+**PIVOT-003 overlap:** Task 7.1 call_parser.py encoding fix was already completed by Instance C during Phase 4.2. Instance F Task 7.1 added one docstring, three encoding tests, one DIVERGENCE_LEDGER entry. No conflicting logic. Coordinated post-hoc. No rollback needed.
+
 ---
 
 ### 2025-02-17 — Keyword False Positive Rate Unknown
